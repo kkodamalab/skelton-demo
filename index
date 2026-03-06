@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>MediaPipe Realtime Skeleton Demo</title>
+  <style>
+    :root {
+      --bg: #0b1020;
+      --panel: rgba(17, 24, 39, 0.78);
+      --text: #f3f4f6;
+      --muted: #cbd5e1;
+      --accent: #60a5fa;
+      --accent-2: #22c55e;
+      --danger: #f87171;
+      --border: rgba(255, 255, 255, 0.12);
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: linear-gradient(180deg, #0b1020 0%, #111827 100%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+
+    .app {
+      max-width: 1080px;
+      margin: 0 auto;
+      padding: 20px 16px 28px;
+    }
+
+    .header {
+      margin-bottom: 16px;
+    }
+
+    .header h1 {
+      margin: 0 0 6px;
+      font-size: 1.4rem;
+      line-height: 1.2;
+    }
+
+    .header p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.95rem;
+    }
+
+    .controls {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 12px;
+      backdrop-filter: blur(10px);
+    }
+
+    .control-card label {
+      display: block;
+      font-size: 0.84rem;
+      color: var(--muted);
+      margin-bottom: 6px;
+    }
+
+    .control-card select,
+    .control-card input[type="range"],
+    .control-card button {
+      width: 100%;
+    }
+
+    select,
+    button {
+      appearance: none;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text);
+      padding: 10px 12px;
+      font-size: 0.95rem;
+    }
+
+    button {
+      cursor: pointer;
+      font-weight: 600;
+      transition: transform 0.15s ease, opacity 0.15s ease;
+    }
+
+    button:hover { transform: translateY(-1px); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+
+    .btn-primary { background: rgba(96, 165, 250, 0.2); }
+    .btn-danger { background: rgba(248, 113, 113, 0.16); }
+
+    .toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .toggle-row input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+    }
+
+    .viewer-wrap {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 9 / 16;
+      max-height: 82vh;
+      margin: 0 auto;
+      overflow: hidden;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+      background: #000;
+    }
+
+    video,
+    canvas {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    .mirror {
+      transform: scaleX(-1);
+    }
+
+    .hud {
+      position: absolute;
+      left: 10px;
+      right: 10px;
+      bottom: 10px;
+      display: flex;
+      justify-content: space-between;
+      gap: 8px;
+      pointer-events: none;
+    }
+
+    .pill {
+      background: rgba(15, 23, 42, 0.72);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 0.85rem;
+      backdrop-filter: blur(8px);
+    }
+
+    .status-ok { color: #86efac; }
+    .status-warn { color: #fca5a5; }
+
+    .footer {
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 0.85rem;
+      line-height: 1.5;
+    }
+
+    @media (max-width: 860px) {
+      .controls {
+        grid-template-columns: 1fr 1fr;
+      }
+    }
+
+    @media (max-width: 560px) {
+      .controls {
+        grid-template-columns: 1fr;
+      }
+
+      .viewer-wrap {
+        aspect-ratio: 3 / 5;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <div class="header">
+      <h1>MediaPipe リアルタイム・スケルトン表示</h1>
+      <p>スマホカメラ映像を鏡像表示し、MediaPipe Pose でリアルタイムに骨格を重ね描画するデモです。</p>
+    </div>
+
+    <div class="controls">
+      <div class="card control-card">
+        <label for="cameraSelect">カメラ</label>
+        <select id="cameraSelect"></select>
+      </div>
+
+      <div class="card control-card">
+        <label for="modelSelect">モデル精度</label>
+        <select id="modelSelect">
+          <option value="0">Lite（軽量）</option>
+          <option value="1" selected>Full（標準）</option>
+          <option value="2">Heavy（高精度）</option>
+        </select>
+      </div>
+
+      <div class="card control-card">
+        <label for="minDet">検出信頼度 <span id="minDetValue">0.50</span></label>
+        <input id="minDet" type="range" min="0.1" max="0.9" step="0.05" value="0.5" />
+      </div>
+
+      <div class="card control-card">
+        <label for="minTrack">追跡信頼度 <span id="minTrackValue">0.50</span></label>
+        <input id="minTrack" type="range" min="0.1" max="0.9" step="0.05" value="0.5" />
+      </div>
+
+      <div class="card control-card">
+        <div class="toggle-row">
+          <label for="mirrorToggle">鏡像表示</label>
+          <input id="mirrorToggle" type="checkbox" checked />
+        </div>
+      </div>
+
+      <div class="card control-card">
+        <div class="toggle-row">
+          <label for="landmarkToggle">ランドマーク点</label>
+          <input id="landmarkToggle" type="checkbox" checked />
+        </div>
+      </div>
+
+      <div class="card control-card">
+        <button id="startBtn" class="btn-primary">カメラ開始</button>
+      </div>
+
+      <div class="card control-card">
+        <button id="stopBtn" class="btn-danger" disabled>停止</button>
+      </div>
+    </div>
+
+    <div class="viewer-wrap card">
+      <video id="video" playsinline muted></video>
+      <canvas id="canvas"></canvas>
+      <div class="hud">
+        <div class="pill">FPS: <span id="fpsValue">-</span></div>
+        <div class="pill">状態: <span id="statusValue" class="status-warn">待機中</span></div>
+      </div>
+    </div>
+
+    <div class="footer">
+      <div>GitHub Pages で公開する場合は、このファイルを <strong>index.html</strong> としてリポジトリ直下に置いてください。</div>
+      <div>スマホでは Safari / Chrome の最新版推奨。初回はカメラ使用許可が必要です。</div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { Pose, POSE_CONNECTIONS } from 'https://cdn.jsdelivr.net/npm/@mediapipe/pose/pose.js';
+    import { Camera } from 'https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js';
+    import { drawConnectors, drawLandmarks } from 'https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js';
+
+    const videoEl = document.getElementById('video');
+    const canvasEl = document.getElementById('canvas');
+    const ctx = canvasEl.getContext('2d');
+
+    const cameraSelect = document.getElementById('cameraSelect');
+    const modelSelect = document.getElementById('modelSelect');
+    const minDet = document.getElementById('minDet');
+    const minTrack = document.getElementById('minTrack');
+    const minDetValue = document.getElementById('minDetValue');
+    const minTrackValue = document.getElementById('minTrackValue');
+    const mirrorToggle = document.getElementById('mirrorToggle');
+    const landmarkToggle = document.getElementById('landmarkToggle');
+    const startBtn = document.getElementById('startBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const fpsValue = document.getElementById('fpsValue');
+    const statusValue = document.getElementById('statusValue');
+
+    let pose;
+    let camera;
+    let currentStream;
+    let devices = [];
+    let running = false;
+    let lastFrameTs = performance.now();
+    let fpsBuffer = [];
+
+    function setStatus(text, ok = false) {
+      statusValue.textContent = text;
+      statusValue.className = ok ? 'status-ok' : 'status-warn';
+    }
+
+    function applyMirror() {
+      const mirrored = mirrorToggle.checked;
+      videoEl.classList.toggle('mirror', mirrored);
+      canvasEl.classList.toggle('mirror', mirrored);
+    }
+
+    function updateThresholdLabels() {
+      minDetValue.textContent = Number(minDet.value).toFixed(2);
+      minTrackValue.textContent = Number(minTrack.value).toFixed(2);
+    }
+
+    async function listCameras() {
+      const all = await navigator.mediaDevices.enumerateDevices();
+      devices = all.filter(d => d.kind === 'videoinput');
+      cameraSelect.innerHTML = '';
+
+      devices.forEach((device, index) => {
+        const opt = document.createElement('option');
+        opt.value = device.deviceId;
+        opt.textContent = device.label || `カメラ ${index + 1}`;
+        cameraSelect.appendChild(opt);
+      });
+
+      if (!devices.length) {
+        const opt = document.createElement('option');
+        opt.textContent = 'カメラが見つかりません';
+        opt.value = '';
+        cameraSelect.appendChild(opt);
+      }
+    }
+
+    function resizeCanvas() {
+      const rect = videoEl.getBoundingClientRect();
+      const dpr = window.devicePixelRatio || 1;
+      canvasEl.width = rect.width * dpr;
+      canvasEl.height = rect.height * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    function setupPose() {
+      pose = new Pose({
+        locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`,
+      });
+
+      pose.setOptions({
+        modelComplexity: Number(modelSelect.value),
+        smoothLandmarks: true,
+        enableSegmentation: false,
+        smoothSegmentation: false,
+        minDetectionConfidence: Number(minDet.value),
+        minTrackingConfidence: Number(minTrack.value),
+      });
+
+      pose.onResults(onResults);
+    }
+
+    function updatePoseOptions() {
+      if (!pose) return;
+      pose.setOptions({
+        modelComplexity: Number(modelSelect.value),
+        smoothLandmarks: true,
+        enableSegmentation: false,
+        smoothSegmentation: false,
+        minDetectionConfidence: Number(minDet.value),
+        minTrackingConfidence: Number(minTrack.value),
+      });
+    }
+
+    function updateFps() {
+      const now = performance.now();
+      const dt = now - lastFrameTs;
+      lastFrameTs = now;
+      if (dt > 0) {
+        fpsBuffer.push(1000 / dt);
+        if (fpsBuffer.length > 12) fpsBuffer.shift();
+        const avg = fpsBuffer.reduce((a, b) => a + b, 0) / fpsBuffer.length;
+        fpsValue.textContent = avg.toFixed(1);
+      }
+    }
+
+    function clearCanvas() {
+      ctx.save();
+      ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
+      ctx.restore();
+    }
+
+    function onResults(results) {
+      updateFps();
+      clearCanvas();
+
+      if (!results.poseLandmarks) {
+        setStatus('人物未検出', false);
+        return;
+      }
+
+      setStatus('検出中', true);
+
+      drawConnectors(ctx, results.poseLandmarks, POSE_CONNECTIONS, {
+        color: '#60a5fa',
+        lineWidth: 3,
+      });
+
+      if (landmarkToggle.checked) {
+        drawLandmarks(ctx, results.poseLandmarks, {
+          color: '#22c55e',
+          fillColor: '#22c55e',
+          radius: 4,
+        });
+      }
+    }
+
+    async function stopCamera() {
+      running = false;
+      if (camera && typeof camera.stop === 'function') {
+        camera.stop();
+      }
+      if (currentStream) {
+        currentStream.getTracks().forEach(track => track.stop());
+        currentStream = null;
+      }
+      videoEl.srcObject = null;
+      fpsValue.textContent = '-';
+      clearCanvas();
+      setStatus('停止中', false);
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
+    }
+
+    async function startCamera() {
+      try {
+        startBtn.disabled = true;
+        setStatus('起動中…', false);
+
+        await stopCamera();
+        updatePoseOptions();
+
+        const deviceId = cameraSelect.value;
+        const constraints = {
+          audio: false,
+          video: deviceId
+            ? {
+                deviceId: { exact: deviceId },
+                width: { ideal: 720 },
+                height: { ideal: 1280 },
+              }
+            : {
+                facingMode: 'user',
+                width: { ideal: 720 },
+                height: { ideal: 1280 },
+              },
+        };
+
+        currentStream = await navigator.mediaDevices.getUserMedia(constraints);
+        videoEl.srcObject = currentStream;
+        await videoEl.play();
+        resizeCanvas();
+        applyMirror();
+
+        camera = new Camera(videoEl, {
+          onFrame: async () => {
+            if (!running) return;
+            await pose.send({ image: videoEl });
+          },
+          width: 720,
+          height: 1280,
+        });
+
+        running = true;
+        lastFrameTs = performance.now();
+        fpsBuffer = [];
+        await camera.start();
+        setStatus('検出中', true);
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+      } catch (err) {
+        console.error(err);
+        setStatus('起動失敗', false);
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        alert('カメラ起動に失敗しました。HTTPS環境か、GitHub Pages上で開いているか確認してください。');
+      }
+    }
+
+    mirrorToggle.addEventListener('change', applyMirror);
+    modelSelect.addEventListener('change', updatePoseOptions);
+    minDet.addEventListener('input', () => {
+      updateThresholdLabels();
+      updatePoseOptions();
+    });
+    minTrack.addEventListener('input', () => {
+      updateThresholdLabels();
+      updatePoseOptions();
+    });
+    startBtn.addEventListener('click', startCamera);
+    stopBtn.addEventListener('click', stopCamera);
+    window.addEventListener('resize', resizeCanvas);
+
+    (async function init() {
+      updateThresholdLabels();
+      applyMirror();
+      setupPose();
+      try {
+        // iOS/Safariでlabelを得るために一度許可を促す
+        await navigator.mediaDevices.getUserMedia({ video: true, audio: false })
+          .then(stream => stream.getTracks().forEach(track => track.stop()))
+          .catch(() => null);
+        await listCameras();
+        setStatus('待機中', false);
+      } catch (e) {
+        console.error(e);
+        setStatus('初期化失敗', false);
+      }
+    })();
+  </script>
+</body>
+</html>
